@@ -1,0 +1,94 @@
+data:
+  name: wenetspeech
+  vocab: egs/wenetspeech/vocab
+  batch_size: 8
+  dataset_type: online # kaldi, online or espnet
+  model_unit: chars
+  train:
+    feat: ['egs/aishell2/cat_wav.scp']
+    text: ['egs/aishell2/cat_text']
+  test: 
+    feat: ['egs/aishell/data/train/wav.scp']
+    text: ['egs/aishell/data/train/text']
+  num_mel_bins: 80
+  normalization: True
+  global_cmvn: dump/corpus/aishell/train/global_cmvn_80 # 用的是 aishell 数据集提取出的 cmvn
+  volume_perturb: True
+  speed_perturb: True
+  gaussian_noise: 0.10
+  spec_augment: True
+  spec_augment_config:
+    freq_mask_num: 2
+    time_mask_num: 5
+    freq_mask_rate: 0.3
+    time_mask_rate: 0.05
+  num_workers: 4
+model:
+  type: speech2text
+  frontend_type: conv
+  frontend:
+    input_size: 80
+    output_size: 384
+    in_channel: 1
+    mid_channel: 128
+    out_channel: 256
+    kernel_size: [[3,3],[3,3]]
+    stride: [2, 2]
+    dropout: 0.0
+    act_func_type: relu
+    front_end_layer_norm: False
+  encoder_type: conformer
+  encoder:
+    d_model: 384
+    d_ff: 2048
+    cov_kernel_size: 15
+    n_heads: 4
+    nblocks: 12
+    pos_dropout: 0.0
+    slf_attn_dropout: 0.0
+    ffn_dropout: 0.0
+    residual_dropout: 0.1
+    conv_dropout: 0.0
+    macaron_style: True
+    ffn_scale: 0.5
+    conv_bias: True
+    activation: glu
+    relative_positional: True
+  decoder_type: transformer
+  decoder:
+    vocab_size: 5501
+    d_model: 384
+    n_heads: 4
+    d_ff: 2048
+    memory_dim: 384
+    n_blocks: 6
+    pos_dropout: 0.0
+    slf_attn_dropout: 0.0
+    src_attn_dropout: 0.0
+    ffn_dropout: 0.0
+    residual_dropout: 0.1
+    activation: glu
+    normalize_before: False
+    concat_after: False
+    share_embedding: True
+    relative_positional: False
+  ctc_weight: 0.2
+  encoder_output_size: 384
+  smoothing: 0.1
+train:
+  optimizer_type: adam
+  optimizer:
+    lr: 0.0007
+    betas: [0.9, 0.98]
+    eps: 1.0e-9
+    weight_decay: 1.0e-6
+    amsgrad: False
+  scheduler_type: conformer
+  scheduler:
+    warmup_steps: 12000
+  clip_grad: 5
+  epochs: 40
+  accum_steps: 4
+  grad_noise: 0.0
+  load_model: False
+  save_name: Conformer_CTC_CMVN

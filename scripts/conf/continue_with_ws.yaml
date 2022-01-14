@@ -1,0 +1,115 @@
+data:
+  name: wenetspeech
+  vocab: egs/wenetspeech/vocab
+  dataset_type: wenetspeech # kaldi, online, wenetspeech or espnet
+  # model_unit: chars
+  data_type: shard
+  train_path: egs/wenetspeech/data/train/data.list
+  # dev_path: egs/wenetspeech/data/dev/data.list
+  test_path: egs/wenetspeech/data/test_net/data.list
+  normalization: True
+  volume_perturb: True
+  gaussian_noise: 0.20
+  filter_conf:
+    max_length: 1200
+    min_length: 10
+    token_max_length: 100
+    token_min_length: 1
+  resample_conf:
+    resample_rate: 16000
+  speed_perturb: True
+  fbank_conf:
+    num_mel_bins: 40
+    frame_shift: 10
+    frame_length: 25
+    dither: 0.0 # 1.0 for future new model, 0.0 for old model
+  spec_aug: true
+  spec_aug_conf:
+    # num_t_mask: 2
+    # num_f_mask: 2
+    # max_t: 50
+    # max_f: 30
+  # spec_augment_config: 原来的参数
+    freq_mask_num: 2
+    time_mask_num: 5
+    freq_mask_rate: 0.3
+    time_mask_rate: 0.05
+  shuffle: true
+  shuffle_conf:
+    shuffle_size: 1500
+  sort: true
+  sort_conf:
+    sort_size: 1000  # sort_size should be less than shuffle_size
+  batch_conf:
+    batch_type: 'static' # static or dynamic
+    batch_size: 96
+  pin_memory: true
+  num_workers: 4
+  prefetch: 128
+model:
+  type: speech2text
+  frontend_type: conv
+  frontend:
+    input_size: 40
+    output_size: 256
+    in_channel: 1
+    mid_channel: 64
+    out_channel: 128
+    kernel_size: [[3,3],[3,3]]
+    stride: [2, 2]
+    dropout: 0.0
+    act_func_type: relu
+    front_end_layer_norm: False
+  encoder_type: transformer
+  encoder:
+    d_model: 256
+    n_heads: 2
+    d_ff: 512
+    n_blocks: 12
+    pos_dropout: 0.0 
+    slf_attn_dropout: 0.0
+    ffn_dropout: 0.0
+    residual_dropout: 0.1
+    normalize_before: False
+    concat_after: False
+    activation: glu
+    relative_positional: False
+  decoder_type: transformer
+  decoder:
+    vocab_size: 5501
+    d_model: 256
+    n_heads: 2
+    d_ff: 512
+    memory_dim: 256
+    n_blocks: 6
+    pos_dropout: 0.0
+    slf_attn_dropout: 0.0
+    src_attn_dropout: 0.0
+    ffn_dropout: 0.0
+    residual_dropout: 0.1
+    activation: glu
+    normalize_before: False
+    concat_after: False
+    share_embedding: True
+    relative_positional: False
+  ctc_weight: 0.0
+  smoothing: 0.1
+train:
+  optimizer_type: adam
+  optimizer:
+    lr: 0.001
+    betas: [0.9, 0.98]
+    eps: 1.0e-9
+    weight_decay: 1.0e-6
+    amsgrad: False
+  scheduler_type: transformer
+  scheduler:
+    model_size: 256
+    warmup_steps: 12000
+    factor: 1.0
+  clip_grad: 5
+  epochs: 80
+  accum_steps: 4
+  grad_noise: 0.0
+  load_model: False
+  save_name: TransWithWS
