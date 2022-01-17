@@ -12,8 +12,8 @@ from otrans.recognize import build_recognizer
 from otrans.data.loader import FeatureLoader
 from otrans.train.utils import map_to_cuda
 from  tqdm import tqdm
+# import cn2an
 import pdb
-import cn2an
 
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
