@@ -43,10 +43,14 @@ def main(args):
     else:
         params = checkpoint['params']
 
+    # update params
     if params['data']['dataset_type'] == 'wenetspeech':
         params['data']['batch_conf']['batch_size'] = args.batch_size
     else:
         params['data']['batch_size'] = args.batch_size
+    # update args
+    if args.ctc_weight == 0 and 'ctc_weight' in params['model']:
+        args.ctc_weight = params['model']['ctc_weight']
     #if args.file_name is not None:
         #params['data']['test']['feat'] = args.file_name
     #params['data']['test']['feat'] = ['/home/LAB/yumajun/test/0630hktest/wav.scp']  
@@ -213,7 +217,7 @@ def main(args):
                     if i == 0:
                         false_tokens += n_diff
                     nbest_min_false_tokens = min(nbest_min_false_tokens, n_diff)
-                                
+                    
                     print_info = '[%d / %d ] %s - pred-%2d (%3.4f) : %s' % (n, totals, utt_id[b], i, float(scores.cpu()[b, i]), pred)
                     logger.info(print_info)
                     detail_writer.write(print_info+'\n')
@@ -237,8 +241,8 @@ def main(args):
         topn_wer = top_n_false_tokens / total_tokens * 100
         logger.info('The top %d WER is %.3f' % (args.nbest, topn_wer))
         w.write('The Model Chkpt: %s \n' % args.load_model)
-        if model_type == 'ctc':
-            w.write('Decode Mode: %s \n' % args.mode)
+        # if model_type == 'ctc': # now show every decode mode
+        w.write('Decode Mode: %s \n' % args.mode)
         w.write('The WER is %.3f. \n' % wer)
 
         if args.batch_size == 1:
@@ -265,7 +269,9 @@ if __name__ == '__main__':
     parser.add_argument('-cw', '--ctc_weight', type=float, default=0.0)
     parser.add_argument('-d', '--decode_set', type=str, default='test')
     parser.add_argument('-ml', '--max_len', type=int, default=60)
-    parser.add_argument('-md', '--mode', type=str, default='beam')
+    parser.add_argument('-md', '--mode', type=str, default='beam', choices=[
+        'greedy', 'beam', 'ctc_greedy', 'ctc_beam', 'ctc_rescore'
+    ])
     # transducer related
     parser.add_argument('-mt', '--max_tokens_per_chunk', type=int, default=5)
     parser.add_argument('-pf', '--path_fusion', action='store_true', default=False)

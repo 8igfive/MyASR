@@ -10,6 +10,9 @@ __pycache__/
 dump/
 backup/
 egs/
+log/
+*.slurm
+*.sh
 
 # Distribution / packaging
 .Python

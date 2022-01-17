@@ -1,6 +1,7 @@
 import torch
-from otrans.data import EOS, PAD
-
+import math
+from otrans.data import EOS, PAD, BLK
+from torch.nn.utils.rnn import pad_sequence
 
 class Recognizer():
     def __init__(self, model, idx2unit=None, lm=None, lm_weight=None, ngpu=1):
@@ -104,6 +105,13 @@ class Recognizer():
         return results
 
     def nbest_translate(self, nbest_preds):
+        """translate index to charactor
+        Args:
+            nbest_preds (torch.Tensor): (batch_size, nbest, lens), EOS marks an end of a sentence.
+        
+        Returns:
+            results List[List[List[int]]]: (batch_size, nbest)
+        """
         assert nbest_preds.dim() == 3
         batch_size, nbest, lens = nbest_preds.size()
         results = []
@@ -119,6 +127,63 @@ class Recognizer():
                 nbest_list.append(' '.join(pred))
             results.append(nbest_list)
         return results
+
+    def make_pad_mask(self, lengths, max_len):
+        """Make mask tensor containing indices of padded part.
+        See description of make_non_pad_mask.
+        Args:
+            lengths (torch.Tensor): Batch of lengths (B,).
+        Returns:
+            torch.Tensor: Mask tensor containing indices of padded part.
+        Examples:
+            >>> lengths = [5, 3, 2]
+            >>> make_pad_mask(lengths)
+            masks = [[0, 0, 0, 0 ,0],
+                    [0, 0, 0, 1, 1],
+                    [0, 0, 1, 1, 1]]
+        """
+        batch_size = lengths.size(0)
+        max_len = max_len if max_len > 0 else lengths.max().item()
+        seq_range = torch.arange(0,
+                                max_len,
+                                dtype=torch.int64,
+                                device=lengths.device)
+        seq_range_expand = seq_range.unsqueeze(0).expand(batch_size, max_len)
+        seq_length_expand = lengths.unsqueeze(-1)
+        mask = seq_range_expand >= seq_length_expand
+        return mask
+
+    def remove_dup_and_blank(self, pred):
+        ctc_pred = torch.ones_like(pred) * EOS
+        ori_ptr = 0
+        ctc_ptr = 0
+        while ori_ptr < pred.shape[0]:
+            if pred[ori_ptr] != BLK:
+                ctc_pred[ctc_ptr] = pred[ori_ptr]
+                ctc_ptr += 1
+            prev = pred[ori_ptr]
+            while ori_ptr < pred.shape[0] and pred[ori_ptr] == prev:
+                ori_ptr += 1
+        return ctc_pred
+
+    def add_bos_eos(self, labels, bos, eos, pad):
+        _sos = torch.tensor([bos], dtype=labels.dtype, device=labels.device)
+        _eos = torch.tensor([eos], dtype=labels.dtype, device=labels.device)
+        ret = pad_sequence([
+            torch.cat((_sos, label[(label != pad) & (label != bos) & (label != eos)], _eos)) for label in labels
+        ], True, pad)
+        return ret[:, :-1], ret[:, 1:]
+
+    def log_add(self, probs):
+        """
+        Stable log add : mainly handle the -inf overflow problem
+        """
+        if all(prob == -float('inf') for prob in probs):
+            return -float('inf')
+        
+        max_prob = max(probs)
+        t_probs_add = math.log(sum(math.exp(prob - max_prob) for prob in probs))
+        return max_prob + t_probs_add
 
 
 def select_tensor_based_index(tensor, index):

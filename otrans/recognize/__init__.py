@@ -7,7 +7,7 @@ def build_recognizer(model_type, model, lm, args, idx2unit):
         return SpeechToTextRecognizer(
             model=model, lm=lm, lm_weight=args.lm_weight,
             ctc_weight=args.ctc_weight, beam_width=args.beam_width, nbest=args.nbest, max_len=args.max_len,
-            idx2unit=idx2unit, penalty=args.penalty, lamda=args.lamda, ngpu=args.ngpu)
+            idx2unit=idx2unit, penalty=args.penalty, lamda=args.lamda, ngpu=args.ngpu, mode=args.mode)
     elif model_type == 'ctc':
         return CTCRecognizer(
             model=model, lm=lm, lm_weight=args.lm_weight, ngram_lm=args.ngram_lm, beam_width=args.beam_width,

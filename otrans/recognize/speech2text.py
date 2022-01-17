@@ -1,9 +1,15 @@
+import logging
 import torch
-from otrans.data import EOS, BOS
+import torch.nn.functional as F
+from torch.nn.utils.rnn import pad_sequence
+from otrans.data import EOS, BOS, PAD
 from otrans.recognize.base import Recognizer
 from tools.soft_dtw import SoftDTW
 from packaging import version
+from collections import defaultdict
 import pdb
+
+logger = logging.getLogger(__name__)
 
 class SpeechToTextRecognizer(Recognizer):
     def __init__(self, model, lm=None, lm_weight=0.1, ctc_weight=0.0, beam_width=5, nbest=1,
@@ -40,20 +46,7 @@ class SpeechToTextRecognizer(Recognizer):
         log_probs, dec_cache, dec_attn_weights = self.model.decoder.inference(preds, memory, memory_mask, cache)
         return log_probs, dec_cache, dec_attn_weights
 
-    def _beam():
-        pass
-
-    def _ctc_greedy():
-        pass
-
-    def _ctc_beam():
-        pass
-
-    def _ctc_rescore():
-        pass
-
-    def recognize(self, inputs, inputs_mask):
-
+    def _beam(self, inputs, inputs_mask):
         cache = {'fronend': None, 'encoder': None, 'decoder': None, 'lm': None}
 
         self.attn_weights = {}
@@ -125,7 +118,154 @@ class SpeechToTextRecognizer(Recognizer):
             #torch.set_printoptions(profile="full")
             #print(nbest_preds)
             #print(nbest_scores)
-        return self.nbest_translate(nbest_preds), nbest_scores
+        return nbest_preds, nbest_scores
+
+    def _ctc_greedy(self, inputs, inputs_mask):
+
+        if self.ctc_weight == 0:
+            logger.error('Lack of CTC module')
+            return None, None
+
+        memory, memory_mask, _, enc_attn_weights = self.encode(inputs, inputs_mask)
+        
+        batch_size, max_len, hidden_size = memory.size()
+        
+        ctc_probs, memory_lengths = self.model.assistor.inference(memory, memory_mask) # (B, S, V), (B, S)
+        pad_mask = self.make_pad_mask(memory_lengths, max_len)
+        top1_probs, top1_index = ctc_probs.topk(k=1, dim=-1)                           # (B, S, k), (B, S, k)
+        top1_index = top1_index.squeeze(dim=-1).masked_fill_(pad_mask, EOS)            
+        nbest_result = top1_index.unsqueeze(dim=1)                                     # (B, beam, S)
+        new_nbest_result = torch.ones_like(nbest_result, device=memory.device) * EOS
+        
+        for i in range(nbest_result.shape[0]):
+            new_nbest_result[i][0] = self.remove_dup_and_blank(nbest_result[i][0])
+        
+        nbest_score = top1_probs.max(dim=1)[0]                                         # (B, beam)
+        
+        return new_nbest_result, nbest_score
+
+    def _ctc_beam(self, inputs, inputs_mask, require_encoder_out=False, keep_all_result=False):
+        if self.ctc_weight == 0:
+            logger.error('Lack of CTC module')
+            return None, None
+        if inputs.shape[0] > 1:
+            logger.error(f'Decode mode {self.mode} only supports batch_size=1')
+
+        memory, memory_mask, _, enc_attn_weights = self.encode(inputs, inputs_mask)
+        
+        batch_size, max_len, hidden_size = memory.size() # (1, max_len, hidden_len)
+        
+        ctc_probs, memory_lengths = self.model.assistor.inference(memory, memory_mask) # (1, max_len, vocab_size), (1,)
+        ctc_probs = ctc_probs.squeeze(0) # (max_len, vocab_size)
+        
+        cur_hyps = [(tuple(), (0.0, -float('inf')))]
+        for t in range(memory_lengths[0]):
+            logp = ctc_probs[t]  # (vocab_size,)
+            # key: prefix, value (pb, pnb), default value(-inf, -inf)
+            next_hyps = defaultdict(lambda: (-float('inf'), -float('inf')))
+            # 1 First beam prune: select topk best
+            top_k_logp, top_k_index = logp.topk(self.beam_width)  # (beam_size,)
+            for ps, s in map(lambda x: (x[0].item(), x[1].item()), zip(top_k_logp, top_k_index)):
+                for prefix, (pb, pnb) in cur_hyps:
+                    last = prefix[-1] if len(prefix) > 0 else None
+                    if s == 0:  # blank
+                        n_pb, n_pnb = next_hyps[prefix]
+                        n_pb = self.log_add([n_pb, pb + ps, pnb + ps])
+                        next_hyps[prefix] = (n_pb, n_pnb)
+                    elif s == last:
+                        #  Update *ss -> *s;
+                        n_pb, n_pnb = next_hyps[prefix]
+                        n_pnb = self.log_add([n_pnb, pnb + ps])
+                        next_hyps[prefix] = (n_pb, n_pnb)
+                        # Update *s-s -> *ss, - is for blank
+                        n_prefix = prefix + (s, )
+                        n_pb, n_pnb = next_hyps[n_prefix]
+                        n_pnb = self.log_add([n_pnb, pb + ps])
+                        next_hyps[n_prefix] = (n_pb, n_pnb)
+                    else:
+                        n_prefix = prefix + (s, )
+                        n_pb, n_pnb = next_hyps[n_prefix]
+                        n_pnb = self.log_add([n_pnb, pb + ps, pnb + ps])
+                        next_hyps[n_prefix] = (n_pb, n_pnb)
+
+            # 2 Second beam prune
+            next_hyps = sorted(next_hyps.items(),
+                               key=lambda x: self.log_add(x[1]), 
+                               reverse=True)
+            cur_hyps = next_hyps[:self.beam_width]
+        max_hpy_len = max(len(hpy[0]) for hpy in cur_hyps)
+        
+        nbest_probs = torch.ones((1, self.beam_width, max_hpy_len), device=memory.device, dtype=torch.long) * EOS # (B, beam, S)
+        nbest_scores = torch.zeros((1, self.beam_width), device=memory.device, dtype=torch.float32) # (B, beam)
+        for i in range(self.beam_width):
+            for j in range(len(cur_hyps[i][0])):
+                nbest_probs[0][i][j] = cur_hyps[i][0][j]
+            nbest_scores[0][i] = self.log_add(cur_hyps[i][1])
+        
+        if not keep_all_result:
+            nbest_probs = nbest_probs[:, 0, :].unsqueeze(1)
+            nbest_scores = nbest_scores[:, 0].unsqueeze(1)
+        
+        if require_encoder_out:
+            return nbest_probs, nbest_scores, (memory, memory_mask)
+        else:
+            return nbest_probs, nbest_scores
+
+    def _ctc_rescore(self, inputs, inputs_mask):
+        ctc_preds, ctc_scores, encoder_result = self._ctc_beam(inputs, inputs_mask, True, True) # (B, beam, S)
+        ctc_preds, ctc_scores = ctc_preds.squeeze(0), ctc_scores.squeeze(0) # (beam, S)
+
+        ctc_preds_in, _ = self.add_bos_eos(ctc_preds, BOS, EOS, PAD)
+
+        memory, memory_mask = encoder_result[0], encoder_result[1]
+        memory = memory.repeat([self.beam_width, 1, 1])
+        memory_mask = memory_mask.repeat([self.beam_width, 1])
+        
+        logits, _ = self.model.decoder(ctc_preds_in, memory, memory_mask)
+        probs = F.log_softmax(logits, dim=-1)
+
+        best_score = -float('inf')
+        best_index = 0
+        for i in range(ctc_preds.shape[0]):
+            ctc_pred = ctc_preds[i]
+            ctc_pred = ctc_pred[ctc_pred != EOS]
+            ctc_score = ctc_scores[i]
+            decoder_score = 0
+            for j in range(ctc_pred.shape[0]):
+                w = ctc_pred[j].item()
+                decoder_score += probs[i][j][w]
+            decoder_score += probs[i][ctc_pred.shape[0]][EOS]
+            score = decoder_score + ctc_score * self.ctc_weight
+            if score > best_score:
+                best_index = i
+                best_score = score
+
+        nbest_preds = torch.ones((1, 1, ctc_preds.shape[-1]), device=memory.device, dtype=torch.long)
+        nbest_preds[0, 0] = ctc_preds[best_index]
+
+        nbest_scores = torch.tensor([[best_score]], device=memory.device)
+        return nbest_preds, nbest_scores
+
+
+    def recognize(self, inputs, inputs_mask):
+        # (batch_size, beam_width, max_len), (batch_size, beam_width)
+        # TODO: check if ctc module generate sos at the beginning. 
+        if self.mode == 'beam':
+            nbest_preds, nbest_scores = self._beam(inputs, inputs_mask)
+        elif self.mode == 'ctc_greedy':
+            nbest_preds, nbest_scores = self._ctc_greedy(inputs, inputs_mask)
+        elif self.mode == 'ctc_beam':
+            nbest_preds, nbest_scores = self._ctc_beam(inputs, inputs_mask)
+        elif self.mode == 'ctc_rescore':
+            nbest_preds, nbest_scores = self._ctc_rescore(inputs, inputs_mask)
+        else:
+            logger.error('Unknown decode mode={}'.format(self.mode))
+            nbest_preds, nbest_scores = None, None
+
+        if nbest_preds is None:
+            return
+        else:
+            return self.nbest_translate(nbest_preds), nbest_scores
 
     def decode_step(self, preds, memory, memory_mask, cache, scores, flag):
         """ decode an utterance in a stepwise way"""
