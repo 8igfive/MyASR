@@ -248,19 +248,21 @@ class SpeechToTextRecognizer(Recognizer):
 
 
     def recognize(self, inputs, inputs_mask):
-        # (batch_size, beam_width, max_len), (batch_size, beam_width)
-        # TODO: check if ctc module generate sos at the beginning. 
-        if self.mode == 'beam':
-            nbest_preds, nbest_scores = self._beam(inputs, inputs_mask)
-        elif self.mode == 'ctc_greedy':
-            nbest_preds, nbest_scores = self._ctc_greedy(inputs, inputs_mask)
-        elif self.mode == 'ctc_beam':
-            nbest_preds, nbest_scores = self._ctc_beam(inputs, inputs_mask)
-        elif self.mode == 'ctc_rescore':
-            nbest_preds, nbest_scores = self._ctc_rescore(inputs, inputs_mask)
-        else:
-            logger.error('Unknown decode mode={}'.format(self.mode))
-            nbest_preds, nbest_scores = None, None
+
+        with torch.no_grad():
+            # (batch_size, beam_width, max_len), (batch_size, beam_width)
+            # TODO: check if ctc module generate sos at the beginning. 
+            if self.mode == 'beam':
+                nbest_preds, nbest_scores = self._beam(inputs, inputs_mask)
+            elif self.mode == 'ctc_greedy':
+                nbest_preds, nbest_scores = self._ctc_greedy(inputs, inputs_mask)
+            elif self.mode == 'ctc_beam':
+                nbest_preds, nbest_scores = self._ctc_beam(inputs, inputs_mask)
+            elif self.mode == 'ctc_rescore':
+                nbest_preds, nbest_scores = self._ctc_rescore(inputs, inputs_mask)
+            else:
+                logger.error('Unknown decode mode={}'.format(self.mode))
+                nbest_preds, nbest_scores = None, None
 
         if nbest_preds is None:
             return

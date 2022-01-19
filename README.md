@@ -1,16 +1,11 @@
-# OpenTransformer
+# MyASR
 
-This is a speech-transformer model for end-to-end speech recognition.
-If you have any questions, please email to me. (zhengkun.tian@nlpr.ia.ac.cn)
-
+This is a project (or personal test) based on [OpenTransformer](https://github.com/ZhengkunTian/OpenTransformer)
 
 # Requirements
 Pytorch >= 1.2.0 (<= 1.6.0)
 
 Torchaudio >= 0.3.0
-
-## TO DO
-- [ ] Reduce the redundant computation by cache the previous states during inference
 
 ## Function
 
@@ -88,8 +83,5 @@ python tools/average.py your_model_expdir 50 59    #   average the models from 5
 python eval.py -m model.pt
 ```
 
-## Experiments
-Our Model can achieve a CER of 6.7% without CMVN, any external LM and joint-CTC training on [AISHELL-1](http://www.openslr.org/33/), which is better than 7.4% of Chain Model in Kaldi.
-
 ## Acknowledge
-OpenTransformer refer to [ESPNET](https://github.com/espnet/espnet).
+OpenTransformer refer to [OpenTransformer](https://github.com/ZhengkunTian/OpenTransformer).
