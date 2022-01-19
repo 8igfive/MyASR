@@ -84,4 +84,4 @@ python eval.py -m model.pt
 ```
 
 ## Acknowledge
-OpenTransformer refer to [OpenTransformer](https://github.com/ZhengkunTian/OpenTransformer).
+MyASR refer to [OpenTransformer](https://github.com/ZhengkunTian/OpenTransformer).
